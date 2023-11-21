@@ -1,0 +1,65 @@
+---
+title: "Untitled"
+author: "Mamadou"
+date: "2023-11-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+## Initial Setup: Required Libraries and Working Directory
+```{r message=F}
+library(tidyverse)
+library(sf)
+library(plotly)
+library(caret)
+library(likert)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+```
+
+
+## Data Wrangling
+
+## Load and Inspect the Data
+
+```{r}
+# load the data
+data <- read.csv("diabetes_health_indicators.csv")
+```
+
+Removing unwanted variables
+
+```{r}
+data_select <- data %>%
+        select(-c(3,7,14,18,))
+```
+
+let's check the structure of the dataset
+```{r}
+str(data_select)
+```
+We can see that all data are numeric. However some are actually categorical ones so we need to convert them to factor data type.
+
+```{r}
+data_select$Diabetes_binary <- as.factor(data_select$Diabetes_binary)
+data_select$HighBP <- as.factor(data_select$HighBP)
+data_select$CholCheck <- as.factor(data_select$CholCheck)
+data_select$Smoker <- as.factor(data_select$Smoker)
+data_select$HeartDiseaseorAttack <- as.factor(data_select$HeartDiseaseorAttack)
+data_select$PhysActivity <- as.factor(data_select$PhysActivity)
+data_select$Fruits <- as.factor(data_select$Fruits)
+data_select$Veggies <- as.factor(data_select$Veggies)
+data_select$HvyAlcoholConsump <- as.factor(data_select$HvyAlcoholConsump)
+data_select$AnyHealthcare <- as.factor(data_select$AnyHealthcare)
+data_select$Sex <- as.factor(data_select$Sex)
+```
+
+## Data Subset
+Since we have 70692 observations, we need to subset the data a lower dataset and we opt to move to 2000 observation and 9 variables.
+```{r}
+data_subset <- data_select[1:2000, ]
+```
