@@ -1,0 +1,164 @@
+---
+title: "Untitled"
+author: "Mamadou"
+date: "2023-11-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+setwd(F:/diabetes_health_indicators.csv)
+## Initial Setup: Required Libraries and Working Directory
+```{r message=F}
+library(tidyverse)
+library(sf)
+library(plotly)
+library(caret)
+library(likert)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+```
+
+
+## Data Wrangling
+
+## Load and Inspect the Data
+
+```{r}
+# load the data
+
+
+data <- read.csv("diabetes_health_indicators.csv")
+```
+
+Removing unwanted variables
+
+```{r}
+data_select <- data %>%
+        select(-c(7,14,18))
+```
+
+let's check the structure of the dataset
+```{r}
+str(data_select)
+```
+We can see that all data are numeric. However some are actually categorical ones so we need to convert them to factor data type.
+
+```{r}
+data_select$Diabetes_binary <- as.factor(data_select$Diabetes_binary)
+data_select$HighBP <- as.factor(data_select$HighBP)
+data_select$CholCheck <- as.factor(data_select$CholCheck)
+data_select$Smoker <- as.factor(data_select$Smoker)
+data_select$HeartDiseaseorAttack <- as.factor(data_select$HeartDiseaseorAttack)
+data_select$PhysActivity <- as.factor(data_select$PhysActivity)
+data_select$Fruits <- as.factor(data_select$Fruits)
+data_select$Veggies <- as.factor(data_select$Veggies)
+data_select$HvyAlcoholConsump <- as.factor(data_select$HvyAlcoholConsump)
+data_select$AnyHealthcare <- as.factor(data_select$AnyHealthcare)
+data_select$Sex <- as.factor(data_select$Sex)
+data_select$HighChol <-as.factor(data_select$HighChol)
+```
+
+## Data Subset
+Since we have 70692 observations, we need to subset the data a lower dataset and we opt to move to 2000 observation and 10 variables.
+```{r}
+#diabetes_subset <- data_select %>%
+  #select(c("HighBP", "HighChol", "BMI", "Smoker", "HeartDiseaseorAttack", "AnyHealthcare", "Sex", "Age", "Education", "Income", "Diabetes_binary"))
+```
+
+## Create Index for even split of target variable
+```{r}
+#set.seed(123)
+diabetes_sample <- data_select %>%
+  group_by(Diabetes_binary) %>%
+  slice_sample(n = 1000) %>%
+  ungroup() #%>%
+  #slice_sample(n = 2000)
+#summary(diabetes_sample$Diabetes_binary)
+```
+
+## Create Training Data
+```{r}
+#set.seed(123)
+inTraining <- createDataPartition(diabetes_sample$Diabetes_binary, p=0.75, list=FALSE)
+training <- diabetes_sample[inTraining,]
+validation <- diabetes_sample[-inTraining,]
+validation
+```
+
+## Establish training parameters
+```{r}
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+```
+
+## Train the model
+```{r}
+# linear algorithm (Linear Discriminant Analysis)
+#set.seed(123)
+fit.lda <- train(Diabetes_binary~., data=training, method="lda", metric=metric, trControl=control)
+predictionsLDA <- predict(fit.lda, validation)
+predictionsLDA
+
+cmLDA <- confusionMatrix(predictionsLDA, as.factor(validation$Diabetes_binary))
+cmLDA
+
+# Classification and Regression Trees
+#set.seed(123)
+fit.cart <- train(Diabetes_binary~., data=training, method="rpart", metric=metric, trControl=control)
+predictionsCRT <- predict(fit.cart, validation)
+
+cmCRT <- confusionMatrix(predictionsCRT, as.factor(validation$Diabetes_binary))
+cmCRT
+
+# k-Nearest Neighbors
+#set.seed(123)
+fit.knn <- train(Diabetes_binary~., data=training, method="knn", metric=metric, trControl=control)
+predictionsKNN <- predict(fit.knn, validation)
+
+cmKNN <- confusionMatrix(predictionsKNN, as.factor(validation$Diabetes_binary))
+cmKNN
+
+# Support Vector Machines
+set.seed(123)
+fit.svm <- train(Diabetes_binary~., data=training, method="svmRadial", metric=metric, trControl=control)
+predictionsSVM <- predict(fit.svm, validation)
+
+cmSVM <- confusionMatrix(predictionsSVM, as.factor(validation$Diabetes_binary))
+cmSVM
+
+# Logistic Regression
+#set.seed(123)
+fit.glm <- train(Diabetes_binary~., data=training, method="glm", metric=metric, trControl=control)
+predictionsLR <- predict(fit.glm, validation)
+
+cmLR <- confusionMatrix(predictionsLR, as.factor(validation$Diabetes_binary))
+cmLR
+```
+
+
+## evaluate the model
+```{r}
+results <- resamples(list(lda=fit.lda, cart=fit.cart, knn=fit.knn, svm=fit.svm, glm=fit.glm))
+summary(results)
+
+results_df <- as.data.frame(results)
+
+results_tidy <- results_df %>% 
+  pivot_longer(names_to = "Model", values_to = "Accuracy", -Resample) %>% 
+  group_by(Model) %>% 
+  summarise(Mean_Accuracy = mean(Accuracy))
+
+mean_acc <- results_tidy %>% 
+  ggplot(aes(x=fct_reorder(Model, Mean_Accuracy), y=Mean_Accuracy))+
+  geom_bar(stat = "identity")+
+  coord_flip()+
+  xlab("Mean Accuracy")+
+  ylab("Model")+
+  theme(text = element_text(size = 20))
+
+mean_acc
+```
+
