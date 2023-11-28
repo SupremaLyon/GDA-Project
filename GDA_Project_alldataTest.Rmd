@@ -1,0 +1,252 @@
+---
+title: "Untitled"
+author: "Mamadou"
+date: "2023-11-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+setwd(F:/diabetes_health_indicators.csv)
+## Initial Setup: Required Libraries and Working Directory
+```{r message=F}
+library(tidyverse)
+library(sf)
+library(plotly)
+library(caret)
+library(likert)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+```
+
+
+## Data Wrangling
+
+## Load and Inspect the Data
+
+```{r}
+# load the data
+
+
+data <- read.csv("diabetes_health_indicators.csv")
+```
+
+Removing unwanted variables
+
+```{r}
+data_select <- data %>%
+        select(-c(10:14,16:17,19))
+```
+
+let's check the structure of the dataset
+```{r}
+str(data_select)
+```
+We can see that all data are numeric. However some are actually categorical ones so we need to convert them to factor data type.
+
+```{r}
+data_select$Diabetes_binary <- as.factor(data_select$Diabetes_binary)
+data_select$HighBP <- as.factor(data_select$HighBP)
+data_select$CholCheck <- as.factor(data_select$CholCheck)
+data_select$Smoker <- as.factor(data_select$Smoker)
+data_select$HeartDiseaseorAttack <- as.factor(data_select$HeartDiseaseorAttack)
+data_select$PhysActivity <- as.factor(data_select$PhysActivity)
+data_select$HighChol <-as.factor(data_select$HighChol)
+data_select$Stroke <-as.factor(data_select$Stroke)
+data_select$GenHlth <-as.factor(data_select$GenHlth)
+data_select$DiffWalk <-as.factor(data_select$DiffWalk)
+data_select$Education <-as.factor(data_select$Education)
+data_select$Income <-as.factor(data_select$Income)
+```
+
+## Data Subset
+Since we have 70692 observations, we need to subset the data a lower dataset and we opt to move to 2000 observation and 10 variables.
+
+```{r}
+#Create Index for even split of target variable
+diabetes_sample <- data_select %>%
+  group_by(Diabetes_binary) %>%
+  slice_sample(n = 5000) %>%
+  ungroup() 
+```
+
+## Z transformation
+```{r}
+diabetes_scaled <- diabetes_sample %>% 
+ mutate(across(.cols = c(5,12), ~ as.vector(scale(.)), .names = "scaled_{.col}")) %>%
+  select(c(1:4, 6:11,13:16))
+View(df_scaled)
+```
+
+
+## Create Training Data
+```{r}
+#set.seed(123)
+inTraining <- createDataPartition(diabetes_scaled$Diabetes_binary, p=0.75, list=FALSE)
+training <- diabetes_scaled[inTraining,]
+validation <- diabetes_scaled[-inTraining,]
+validation
+```
+
+## Establish training parameters
+```{r}
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+```
+
+## Train the model
+```{r}
+# linear algorithm (Linear Discriminant Analysis)
+fit.lda <- train(Diabetes_binary~., data=training, method="lda", metric=metric, trControl=control)
+predictionsLDA <- predict(fit.lda, validation)
+predictionsLDA
+
+cmLDA <- confusionMatrix(predictionsLDA, as.factor(validation$Diabetes_binary))
+cmLDA
+```
+
+```{r}
+# Classification and Regression Trees
+fit.cart <- train(Diabetes_binary~., data=training, method="rpart", metric=metric, trControl=control)
+predictionsCRT <- predict(fit.cart, validation)
+
+cmCRT <- confusionMatrix(predictionsCRT, as.factor(validation$Diabetes_binary))
+cmCRT
+```
+
+```{r}
+# k-Nearest Neighbors
+fit.knn <- train(Diabetes_binary~., data=training, method="knn", metric=metric, trControl=control)
+predictionsKNN <- predict(fit.knn, validation)
+
+cmKNN <- confusionMatrix(predictionsKNN, as.factor(validation$Diabetes_binary))
+cmKNN
+```
+
+```{r}
+# Support Vector Machines
+fit.svm <- train(Diabetes_binary~., data=training, method="svmRadial", metric=metric, trControl=control)
+predictionsSVM <- predict(fit.svm, validation)
+
+cmSVM <- confusionMatrix(predictionsSVM, as.factor(validation$Diabetes_binary))
+cmSVM
+```
+
+```{r}
+# Logistic Regression
+fit.glm <- train(Diabetes_binary~., data=training, method="glm", metric=metric, trControl=control)
+predictionsLR <- predict(fit.glm, validation)
+
+cmLR <- confusionMatrix(predictionsLR, as.factor(validation$Diabetes_binary))
+cmLR
+```
+
+
+```{r}
+# Random Forests
+fit.rf <- train(Diabetes_binary ~., data=training, method="rf", metric=metric, trControl=control)
+predictions.rf <- predict(fit.rf, validation)
+metrics.rf <- postResample(predictions.rf, validation$Diabetes_binary)
+metrics.rf
+
+cmrf <- confusionMatrix(predictions.rf, as.factor(validation$Diabetes_binary))
+cmrf
+```
+
+
+## evaluate the model
+```{r}
+results <- resamples(list(lda= fit.lda, cart=fit.cart, knn=fit.knn, svm=fit.svm, glm=fit.glm, rf=fit.rf))
+summary(results)
+
+results_df <- as.data.frame(results)
+
+results_tidy <- results_df %>% 
+  pivot_longer(names_to = "Model", values_to = "Accuracy", -Resample) %>% 
+  group_by(Model) %>% 
+  summarise(Mean_Accuracy = mean(Accuracy))
+
+mean_acc <- results_tidy %>% 
+  ggplot(aes(x=fct_reorder(Model, Mean_Accuracy), y=Mean_Accuracy))+
+  geom_bar(stat = "identity")+
+  coord_flip()+
+  xlab("Mean Accuracy")+
+  ylab("Model")+
+  theme(text = element_text(size = 20))
+
+mean_acc
+```
+
+
+
+```{r}
+# Calculate variable importance for four of five models
+importance1 <- varImp(fit.glm)
+importance2 <- varImp(fit.rf)
+importance3 <- varImp(fit.cart)
+
+imp1 <- importance1$importance 
+imp2 <- importance2$importance
+imp3 <- importance3$importance
+
+ p1 <- imp1 %>% 
+   mutate(Predictor = rownames(imp1)) %>% 
+   pivot_longer(names_to = "Diabetes_binary", values_to = "Importance", -Predictor) %>%
+   ggplot(aes(x=Predictor, y=Importance))+
+   geom_segment(aes(x=Predictor, xend=Predictor, y=0, yend=Importance), color="skyblue") +
+   geom_point(color="blue", size=4, alpha=0.6) +
+   theme_light() +
+   coord_flip() +
+   theme(
+     panel.grid.major.y = element_blank(),
+     panel.border = element_blank(),
+     axis.ticks.y = element_blank())+
+   ylab("Linear Regresssion")+
+   xlab("")
+ 
+ p2 <- imp2 %>% 
+  mutate(Predictor = rownames(imp2)) %>% 
+  pivot_longer(names_to = "Diabetes_binary", values_to = "Importance", -Predictor) %>%
+  ggplot(aes(x=Predictor, y=Importance))+
+  geom_segment(aes(x=Predictor, xend=Predictor, y=0, yend=Importance), color="skyblue") +
+  geom_point(color="blue", size=4, alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank())+
+  ylab("Random Forest")+
+  xlab("")
+
+ 
+ p3 <- imp3 %>%
+   mutate(Predictor = rownames(imp3)) %>%
+   pivot_longer(names_to = "Diabetes_binary", values_to = "Importance", -Predictor) %>%
+   ggplot(aes(x=Predictor, y=Importance))+
+   geom_segment(aes(x=Predictor, xend=Predictor, y=0, yend=Importance), color="skyblue") +
+   geom_point(color="blue", size=4, alpha=0.6) +
+   theme_light() +
+   coord_flip() +
+   theme(
+     panel.grid.major.y = element_blank(),
+     panel.border = element_blank(),
+     axis.ticks.y = element_blank())+
+   ylab("Cart")+
+   xlab("")
+
+average_importance <- rowMeans(cbind(imp1,imp2, imp3))
+importance_df <- data.frame(Predictor = names(average_importance), Importance = average_importance)
+importance_df <- importance_df[order(importance_df$Importance, decreasing = TRUE), ]
+library(ggplot2)
+
+ggplot(importance_df, aes(x = reorder(Predictor, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Predictor", y = "Average Importance Score") +
+  ggtitle("Overall Predictor Importance Across All Models")
+
+```
