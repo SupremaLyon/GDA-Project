@@ -1,0 +1,401 @@
+---
+title: "Untitled"
+author: "Group 2"
+date: "2023-11-21"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+setwd(F:/diabetes_health_indicators.csv)
+## Initial Setup: Required Libraries and Working Directory
+```{r message=F}
+library(tidyverse)
+library(sf)
+library(plotly)
+library(caret)
+library(likert)
+library(grid)
+library(gridExtra)
+library(ggpubr)
+```
+
+
+## Data Wrangling
+
+### Load and Inspect the Data
+
+```{r}
+# load the data
+setwd("C:\\New folder\\diabetes_health_indicators.csv")
+data <- load.csv("diabetes_health_indicators.csv")
+```
+
+let's check the structure of the dataset
+```{r}
+str(data)
+```
+after loading the data , we decided to check its structure and we noticed that all variable were numeric. Howewer, because we read the metadata we knew that most of the variable in our dataset should be categorical, not numeric. Only the BMI (Body Mass Index) and Age were actually numeric. So we decided to apply a Z transformation on these variables. 
+Later in the document, we will convert the other variables into categorical ones. 
+
+
+### Z transformation of numeric data
+the z-transformation, rescales our data so that the mean is equal to zero for all of our numeric variables, while values of -1 and 1 represent one standard deviation above or below the mean for that variable. 
+```{r}
+diabetes_scaled <- data %>% 
+ mutate(across(.cols = c(5,20), ~ as.vector(scale(.)), .names = "scaled_{.col}")) %>%
+  select(c(1:4, 6:19,21:24))
+View(diabetes_scaled)
+```
+
+
+### data subset
+Then we decided to subset our data from 70692 variables to 10000. we did so because we had issues while training the models using the whole dataset. We also made sure to have an equal number of the binary values (0 and 1) of our targeted variable. 
+```{r}
+diabetes_sample <- diabetes_scaled %>%
+  group_by(Diabetes_binary) %>%
+  slice_sample(n = 5000) %>%
+  ungroup() 
+```
+
+## Exploratory Data Analysis
+In the exploratory data analysis phase, `ggplot2` is used for visualizing various aspects of the data. his step is vital for uncovering trends, patterns, and potential outliers in the dataset.
+The jittered plots below display the distribution of the binary outcome (0 or 1) of out targeted variable across different levels of the variables. Visualizing correlations between the predictors and the target variable allowed us to start selecting relevant predictors for our models. However, to be as much accurate as possible, we pushed forward our analysis in the next sections. 
+```{r}
+library(ggplot2)
+
+# Assuming diabetes_scaled is the name of your dataset
+target_variable <- "Diabetes_binary"
+
+# Identify numeric predictor variables (excluding scaled_BMI and scaled_Age)
+numeric_predictors <- names(diabetes_sample)[sapply(diabetes_sample, is.numeric) & names(diabetes_sample) != target_variable & !names(diabetes_sample) %in% c("scaled_BMI", "scaled_Age")]
+
+# Create and display jittered dot plots one by one
+for (predictor in numeric_predictors) {
+  plot_title <- paste("Jittered Dot Plot of", predictor, "vs.", target_variable)
+  plot_data <- data.frame(x = diabetes_sample[[predictor]], y = diabetes_sample[[target_variable]])
+
+  # Create the jittered dot plot
+  plot <- ggplot(plot_data, aes(x = x, y = y)) +
+    geom_jitter(alpha = 0.5) +  # Adjust alpha for transparency
+    labs(title = plot_title, x = predictor, y = target_variable)
+
+  # Print the jittered dot plot
+  print(plot)
+}
+```
+
+
+### set all categorical data from numeric to factor
+Here, the numeric data that are categorical by nature are converted to factors. This ensures that the machine learning algorithms interpret and process these variables correctly.
+```{r}
+col_numbers <- c(1:20)
+
+diabetes_scaled_factor <- diabetes_sample %>%
+  mutate_at(vars(col_numbers), as.factor)
+str(diabetes_scaled_factor)
+```
+
+
+### Analyse of the distribution of each variable in the dataset
+The bar chart below represents the distribution of categories within each categorical variable in our data. It allowed us to understanding the balance or imbalance of categories, identifying any potential biases in the data.
+```{r}
+categorical_columns <- names(diabetes_scaled_factor)[c(2:14, 17:20)]
+
+data_long <- tidyr::pivot_longer(diabetes_scaled_factor, cols = all_of(categorical_columns), names_to = "Variable", values_to = "Category")
+
+ggplot(data_long, aes(x = Variable, fill = Category)) +
+  geom_bar(position = "dodge", stat = "count") +
+  labs(title = "Frequency of Categories", x = "Variable", y = "Count") +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1))
+```
+
+### Choice of predictors 
+Based on the Exploratory Data Analysis and research conducted on relevant factors influencing the likelihood of diabetes, we have selected the following predictors :
+High Blood Pressure : 
+High blood pressure can damage blood vessels, reducing blood flow to vital organs, including the pancreas, which plays a crucial role in regulating blood sugar. It often coexists with insulin resistance and obesity, both of which are risk factors for Type 2 diabetes. Hypertension can lead to chronic inflammation, which may contribute to the development of insulin resistance and diabetes. Studies have shown a strong correlation between hypertension and the risk of developing diabetes, especially Type 2 (American Diabetes Association, 2023). Effective management of blood pressure can reduce the risk of developing diabetes in hypertensive individuals.
+
+High Cholesterol: 
+Elevated levels of bad cholesterol (LDL) and triglycerides are known to contribute to the development of insulin resistance, a precursor to diabetes. High cholesterol is often associated with obesity, metabolic syndrome, and Type 2 diabetes. People with diabetes often have dyslipidemia (abnormal cholesterol levels), which can worsen their condition (Centers for Disease Control and Prevention, 2021). Lowering cholesterol levels can improve insulin sensitivity and reduce the risk of diabetes. Cholesterol management is a critical part of diabetes prevention and treatment strategies.
+
+Cholesterol Check:
+Regular cholesterol checks can help identify individuals at risk of diabetes early, as dyslipidemia is a common precursor. Monitoring cholesterol levels can guide lifestyle and dietary interventions to prevent diabetes. Cholesterol checks can reveal patterns like elevated triglycerides, which are linked to insulin resistance. Timely intervention based on cholesterol check results can prevent or delay the onset of diabetes. Cholesterol checks are part of a holistic approach to managing health and identifying risk factors for diabetes (WebMD, 2021).
+
+Body Mass Index (BMI):
+A higher BMI is strongly associated with an increased risk of developing Type 2 diabetes due to greater amounts of fatty tissue. Excess fat, particularly around the abdomen, can lead to insulin resistance. BMI is a simple and widely used measure to categorize individuals into various weight categories, which are indicative of their diabetes risk. Weight reduction and maintaining a healthy BMI can significantly lower the risk of diabetes (National Heart, Lung, and Blood Institute, n.d.).  BMI is a useful tool in both screening for diabetes risk and monitoring the effectiveness of interventions.
+
+Smoker:
+Smoking increases the risk of Type 2 diabetes, with heavier smoking increasing the risk further. The toxins in cigarette smoke can lead to insulin resistance. Smoking can exacerbate the complications of diabetes, making management more challenging. Quitting smoking is shown to reduce the risk of developing diabetes. Smoking influences other risk factors for diabetes, such as inflammation and oxidative stress (Centers for Disease Control and Prevention, 2022).
+
+Stroke:
+Individuals who have had a stroke often experience changes in their lifestyle and physical activity, influencing diabetes risk. Stroke and diabetes share common risk factors like hypertension and obesity. A history of stroke indicates the presence of cardiovascular issues, which are closely linked to diabetes. Post-stroke lifestyle changes can either increase or reduce the risk of diabetes, depending on the nature of the changes (Healthline, 2022). Monitoring and managing diabetes risk factors are crucial in stroke survivors.
+
+Heart Disease or Attack:
+Cardiovascular diseases, including heart attacks, often coexist with diabetes, indicating shared risk factors like poor diet and physical inactivity. Heart disease can influence lifestyle choices that affect diabetes risk. The presence of heart disease can impact the body's ability to manage blood sugar effectively. Managing heart disease risk factors, like cholesterol and blood pressure, also helps in diabetes prevention. A history of heart disease necessitates closer monitoring for diabetes (Johns Hopkins Medicine, n.d.).
+
+Physical Activity:
+Regular physical activity helps in maintaining a healthy weight, reducing the risk of obesity, a major risk factor for diabetes. Exercise improves insulin sensitivity and glucose metabolism. Sedentary lifestyles are linked to an increased risk of Type 2 diabetes. Physical activity is a key component of diabetes prevention and management programs. Even moderate activity can have significant benefits in reducing diabetes risk (Centers for Disease Control and Prevention, 2022).
+
+Income
+Higher income levels generally provide better access to healthcare services, healthy food options, and environments conducive to physical activity, all of which can help in diabetes prevention. Lower income levels are often linked with limited access to healthcare, resulting in delayed diagnosis and management of diabetes. Economic constraints can lead to poor dietary choices and higher consumption of processed, high-sugar foods, increasing diabetes risk. Income disparities can contribute to stress and mental health issues, which are risk factors for chronic diseases like diabetes (Minnesota Department of Health, n.d).
+Public health strategies targeting diabetes prevention need to consider income disparities to be effective across different socioeconomic groups.
+
+Sex
+Biological differences between males and females significantly influence diabetes risk, with hormonal variations notably impacting insulin sensitivity and glucose metabolism. Women face a unique risk through gestational diabetes, which can increase their susceptibility to Type 2 diabetes later. Men, however, are more prone to storing visceral fat, closely linked to insulin resistance, and often develop diabetes at a younger age and lower BMI compared to women. Post-menopausal women experience hormonal changes that can exacerbate the risk of insulin resistance. Consequently, sex-specific factors are crucial in understanding and managing diabetes risk (Kautzky-Willer A. et al., 2016).
+
+Fruit 
+Fruit consumption plays a vital role in diabetes prevention, largely due to the fiber content in fruits which aids in stabilizing blood glucose levels and enhancing glycemic control. The nutrient density of fruits, rich in vitamins, minerals, and antioxidants, contributes positively to metabolic health and diabetes prevention. By replacing high-calorie snacks with fruits, individuals can manage weight more effectively, a key factor in reducing diabetes risk. The dietary fiber in fruits not only supports weight management but also improves gut health, thereby enhancing insulin sensitivity. However, the type of fruit consumed is important, as high-sugar fruits can have a different impact compared to those with lower sugar content and higher fiber (Muraki, I., et. al., 2013).
+
+Education 
+The level of education is a noteworthy predictor in understanding and managing the risk of diabetes, primarily due to its influence on health literacy and lifestyle choices. Individuals with higher educational attainment typically have greater access to health-related information, enabling them to make informed decisions about diet, physical activity, and healthcare. This knowledge often translates into healthier lifestyle practices, such as balanced nutrition and regular exercise, which are key factors in preventing and managing diabetes. Additionally, education is closely tied to socioeconomic status, influencing access to quality healthcare and resources for diabetes management. Furthermore, educated individuals are generally more adept at navigating healthcare systems and understanding medical advice, which can lead to more effective management of diabetes and its associated risks. Hence, education level plays a crucial role in shaping behaviors and access to resources that directly impact diabetes risk and management.
+
+Difficulty Walking
+Difficulty walking can be a sign of decreased physical activity, which is a risk factor for diabetes. Reduced mobility limits the body's ability to regulate blood sugar effectively through exercise. this might indicate other underlying health issues like obesity or cardiovascular problems, contributing to increased risk of diabetes. These conditions are often interlinked and can exacerbate each other. Difficulty in walking may also reflect muscle or nerve damage, which can be a consequence of unmanaged diabetes, indicating a need for careful monitoring of blood sugar levels. This condition can lead to a sedentary lifestyle, further increasing the risk of obesity and insulin resistance, both of which are major contributors to Type 2 diabetes. Addressing mobility issues and promoting physical activity, even in limited capacities, are essential in diabetes prevention and management strategies.
+
+Age
+The risk of developing Type 2 diabetes increases with age, particularly after the age of 45, due to factors like decreased insulin sensitivity and changes in body composition. Aging is often associated with reduced physical activity and changes in metabolism, both of which can increase diabetes risk. Older adults may have accumulated more health risk factors over time, such as obesity and hypertension, contributing to a higher diabetes risk. Pancreatic beta-cell function tends to decline with age, impacting insulin production and glucose regulation. Early detection and management of diabetes are crucial in older adults, as they are more vulnerable to the complications of the disease.
+
+General Health
+Better general health often correlates with healthier lifestyle choices that reduce diabetes risk. Poor general health might be indicative of underlying conditions that could increase diabetes risk. Self-assessment of health can reflect awareness and management of risk factors for diabetes.
+Good general health is often associated with better metabolic functioning, reducing the risk of diabetes. Monitoring 
+
+Veggies
+Vegetable consumption is a significant predictor in diabetes prevention due to several key factors. First, vegetables are high in dietary fiber, which slows down the absorption of sugars in the bloodstream, thereby aiding in maintaining stable blood glucose levels and enhancing glycemic control. This is particularly important in preventing spikes in blood sugar that can lead to insulin resistance, a precursor to Type 2 diabetes. Moreover, vegetables are nutrient-dense, packed with essential vitamins, minerals, and antioxidants, which contribute to overall metabolic health and help in warding off diabetes. Regular consumption of a variety of vegetables is associated with a lower risk of obesity, a major risk factor for diabetes, as they are low in calories yet highly satiating. Additionally, a diet rich in vegetables can improve gut health, which plays a crucial role in metabolic processes and insulin sensitivity. Thus, incorporating a wide range of vegetables into the diet is a key component of diabetes prevention strategies.
+
+### Removing unwanted variables
+Here we removed unimportant predictors. 
+```{r}
+diabetes_scaled_factor_subset <- diabetes_scaled_factor %>%
+        select(-c(4,5,6,11:13,15,16,18,20))
+```
+
+## Machine Learning
+The core of this project is the application of machine learning algorithms to predict diabetes. This section typically involve steps like selecting features, splitting data into training and test sets, model training, model validation, and evaluating the model's performance.
+
+### Create Training and Test Datasets
+```{r}
+#set.seed(123)
+inTraining <- createDataPartition(diabetes_scaled_factor_subset$Diabetes_binary, p=0.75, list=FALSE)
+training <- diabetes_scaled_factor_subset[inTraining,]
+validation <- diabetes_scaled_factor_subset[-inTraining,]
+validation
+```
+
+### Establish training parameters
+```{r}
+control <- trainControl(method="cv", number=10)
+metric <- "Accuracy"
+```
+
+### Model Training
+We trained and tested our data on 6 algorithms:
+ - Linear Discriminant Analysis
+ - Classification & Regression Trees
+ - k-Nearest Neighbors
+ - Support Vector Machines
+ - Logistic Regression
+ - Random Forest
+
+### Linear Discriminant Analysis
+```{r}
+# linear algorithm (Linear Discriminant Analysis)
+fit.lda <- train(Diabetes_binary~., data=training, method="lda", metric=metric, trControl=control)
+predictionsLDA <- predict(fit.lda, validation)
+predictionsLDA
+
+cmLDA <- confusionMatrix(predictionsLDA, as.factor(validation$Diabetes_binary))
+cmLDA
+```
+
+### Classification and Regression Trees
+```{r}
+# Classification and Regression Trees
+fit.cart <- train(Diabetes_binary~., data=training, method="rpart", metric=metric, trControl=control)
+predictionsCRT <- predict(fit.cart, validation)
+
+cmCRT <- confusionMatrix(predictionsCRT, as.factor(validation$Diabetes_binary))
+cmCRT
+```
+
+### k-Nearest Neighbors
+```{r}
+# k-Nearest Neighbors
+fit.knn <- train(Diabetes_binary~., data=training, method="knn", metric=metric, trControl=control)
+predictionsKNN <- predict(fit.knn, validation)
+
+cmKNN <- confusionMatrix(predictionsKNN, as.factor(validation$Diabetes_binary))
+cmKNN
+```
+
+### Support Vector Machine
+```{r}
+# Support Vector Machines
+fit.svm <- train(Diabetes_binary~., data=training, method="svmRadial", metric=metric, trControl=control)
+predictionsSVM <- predict(fit.svm, validation)
+
+cmSVM <- confusionMatrix(predictionsSVM, as.factor(validation$Diabetes_binary))
+cmSVM
+```
+
+### Logistic Regression
+```{r}
+# Logistic Regression
+fit.glm <- train(Diabetes_binary~., data=training, method="glm", metric=metric, trControl=control)
+predictionsLR <- predict(fit.glm, validation)
+
+cmLR <- confusionMatrix(predictionsLR, as.factor(validation$Diabetes_binary))
+cmLR
+```
+
+### Random Forest
+```{r}
+# Random Forests
+fit.rf <- train(Diabetes_binary ~., data=training, method="rf", metric=metric, trControl=control)
+predictions.rf <- predict(fit.rf, validation)
+metrics.rf <- postResample(predictions.rf, validation$Diabetes_binary)
+metrics.rf
+
+cmrf <- confusionMatrix(predictions.rf, as.factor(validation$Diabetes_binary))
+cmrf
+```
+
+
+## Model Evaluation
+```{r}
+results <- resamples(list(lda= fit.lda, cart=fit.cart, knn=fit.knn, svm=fit.svm, glm=fit.glm, rf=fit.rf))
+summary(results)
+
+results_df <- as.data.frame(results)
+
+results_tidy <- results_df %>% 
+  pivot_longer(names_to = "Model", values_to = "Accuracy", -Resample) %>% 
+  group_by(Model) %>% 
+  summarise(Mean_Accuracy = mean(Accuracy))
+
+mean_acc <- results_tidy %>% 
+  ggplot(aes(x=fct_reorder(Model, Mean_Accuracy), y=Mean_Accuracy))+
+  geom_bar(stat = "identity")+
+  coord_flip()+
+  xlab("Mean Accuracy")+
+  ylab("Model")+
+  theme(text = element_text(size = 20))
+
+mean_acc
+```
+The Logistic Regression (glm) and Random Forest (rf) performed best in terms of mean accuracy, with Random Forest also showing the highest maximum accuracy and a reasonably good kappa statistic, suggesting a strong ability to generalize. Linear Discriminant Analysis (lda) and Support Vector Machines (svm) follow closely in performance. The k-Nearest Neighbors (knn) and Classification and Regression Trees (cart) models have lower mean accuracy.
+
+## Variable Importnace
+```{r}
+# Calculate variable importance for four of five models
+importance1 <- varImp(fit.glm)
+importance2 <- varImp(fit.rf)
+importance3 <- varImp(fit.cart)
+
+imp1 <- importance1$importance 
+imp2 <- importance2$importance
+imp3 <- importance3$importance
+
+ p1 <- imp1 %>% 
+   mutate(Predictor = rownames(imp1)) %>% 
+   pivot_longer(names_to = "Diabetes_binary", values_to = "Importance", -Predictor) %>%
+   ggplot(aes(x=Predictor, y=Importance))+
+   geom_segment(aes(x=Predictor, xend=Predictor, y=0, yend=Importance), color="skyblue") +
+   geom_point(color="blue", size=4, alpha=0.6) +
+   theme_light() +
+   coord_flip() +
+   theme(
+     panel.grid.major.y = element_blank(),
+     panel.border = element_blank(),
+     axis.ticks.y = element_blank())+
+   ylab("Linear Regresssion")+
+   xlab("")
+ 
+ p2 <- imp2 %>% 
+  mutate(Predictor = rownames(imp2)) %>% 
+  pivot_longer(names_to = "Diabetes_binary", values_to = "Importance", -Predictor) %>%
+  ggplot(aes(x=Predictor, y=Importance))+
+  geom_segment(aes(x=Predictor, xend=Predictor, y=0, yend=Importance), color="skyblue") +
+  geom_point(color="blue", size=4, alpha=0.6) +
+  theme_light() +
+  coord_flip() +
+  theme(
+    panel.grid.major.y = element_blank(),
+    panel.border = element_blank(),
+    axis.ticks.y = element_blank())+
+  ylab("Random Forest")+
+  xlab("")
+
+ 
+ p3 <- imp3 %>%
+   mutate(Predictor = rownames(imp3)) %>%
+   pivot_longer(names_to = "Diabetes_binary", values_to = "Importance", -Predictor) %>%
+   ggplot(aes(x=Predictor, y=Importance))+
+   geom_segment(aes(x=Predictor, xend=Predictor, y=0, yend=Importance), color="skyblue") +
+   geom_point(color="blue", size=4, alpha=0.6) +
+   theme_light() +
+   coord_flip() +
+   theme(
+     panel.grid.major.y = element_blank(),
+     panel.border = element_blank(),
+     axis.ticks.y = element_blank())+
+   ylab("Cart")+
+   xlab("")
+
+average_importance <- rowMeans(cbind(imp1,imp2, imp3))
+importance_df <- data.frame(Predictor = names(average_importance), Importance = average_importance)
+importance_df <- importance_df[order(importance_df$Importance, decreasing = TRUE), ]
+library(ggplot2)
+
+ggplot(importance_df, aes(x = reorder(Predictor, -Importance), y = Importance)) +
+  geom_bar(stat = "identity", fill = "blue") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 90, hjust = 1)) +
+  labs(x = "Predictor", y = "Average Importance Score") +
+  ggtitle("Overall Predictor Importance Across All Models")
+
+```
+BMI has the highest importance score, indicating it is a significant predictor in the models considered. This aligns with scientific understanding, as BMI is a well-known risk factor for diabetes (Gray N., et al., 2015). Following BMI, High Blood Pressure and Age are also highly important, which is consistent with medical research that identifies hypertension and age as critical indicators for the development of diabetes (Johns Hopkins Medicine, n. d.).
+Other variables like Cholesterol Check, Heart Disease or Attack, and Physical Activity also show substantial importance, but to a lesser extent. Variables like Income, Sex, and Fruits are among the least important predictors in this set of models.
+
+
+##References 
+American Diabetes Association, 2023. Diabetes and High Blood Pressure. Retrieved from 
+https://www.medicalnewstoday.com/articles/317220#:~:text=Complications%20Risk%20factors%20Prevention%20Outlook,Possible%20reasons%20for%20this
+
+Centers for Disease Control and Prevention, 2021. Diabetes and Your Heart. Retrieved from 
+https://www.heart.org/en/health-topics/diabetes/diabetes-complications-and-risks/cholesterol-abnormalities--diabetes#:~:text=Diabetes%20tends%20to%20lower%20,going%20in%20the%20wrong%20direction . 
+
+Centers for Disease Control and Prevention, 2022. Physical Activity is Important. Retrieved from 
+https://www.cdc.gov/diabetes/managing/active.html 
+
+Centers for Disease Control and Prevention, 2022. Smoking and Diabetes. Retrieved from
+https://www.cdc.gov/tobacco/campaign/tips/diseases/diabetes.html 
+
+Gray N., Picone G., Sloan F., and Yashkin A., 2015. The Relationship between BMI and Onset of Diabetes Mellitus and its Complications. Retrieved from https://www.ncbi.nlm.nih.gov/pmc/articles/PMC4457375/
+
+Healthline, 2022. Diabetes and Stroke. Retrieved from 
+https://www.healthline.com/health/diabetes/diabetes-and-stroke 
+
+Johns Hopkins Medicine. (n.d.). Diabetes and Heart Disease. Retrieved from
+https://www.hopkinsmedicine.org/health/conditions-and-diseases/diabetes-and-heart-disease  Last visit on 11/30/2023. 
+
+Johns Hopkins Medicine. (n.d.). Diabetes and High Blood Pressure. Retrieved from https://www.hopkinsmedicine.org/health/conditions-and-diseases/diabetes/diabetes-and-high-blood-pressure . Last visit on 11/30/2023. 
+
+Kautzky-Willer, A., Harreiter, J., & Pacini, G. (2016). Sex and Gender Differences in Risk, Pathophysiology and Complications of Type 2 Diabetes Mellitus. Endocrine Reviews, 37(3), 278-316. doi:10.1210/er.2015-1137. Retrieved from
+https://bmcmedicine.biomedcentral.com/articles/10.1186/s12916-019-1355-0 
+
+Minnesota Department of Health. (n.d.). Diabetes and Income. Retrieved from
+chrome-extension://efaidnbmnnnibpcajpcglclefindmkaj/https://www.health.state.mn.us/diseases/diabetes/docs/diabetesincome.pdf  Last visit on 11/30/2023. 
+
+Muraki, I., Imamura, F., Manson, J. E., Hu, F. B., Willett, W. C., van Dam, R. M., & Sun, Q. (2013). Fruit consumption and risk of type 2 diabetes: results from three prospective longitudinal cohort studies.etrieved from
+https://pubmed.ncbi.nlm.nih.gov/23990623/ 
+
+National Heart, Lung, and Blood Institute, n.d. Health Risks of Overweight and Obesity. Retrieved from
+https://www.nhlbi.nih.gov/health/educational/lose_wt/risk.htm  Last visisted on 11/30/2023. 
+
+WebMD, 2021. Cholesterol Tests and Diabetes. Retrieved from 
+https://www.webmd.com/diabetes/cholesterol-tests
+
+
+
